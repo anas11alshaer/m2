@@ -33,48 +33,49 @@
 #     - Assembly (.asm) and disassembly (.objdump.asm) files are supported
 #------------------------------------------------------------------------------
 
-# Include source and include directories
-include sources.mk
+TARGET   := c1m2.out
+PLATFORM ?= HOST              # Default if user omits PLATFORM=
 
-# Build Target File
-TARGET = c1m2.out
-
-# Determine the platform
-ifeq ($(PLATFORM),HOST)
-    CC = gcc
-    CFLAGS = -Wall -Werror -g -O0 -std=c99
-    CPPFLAGS = -DHOST
-    LDFLAGS =
-    SIZE = size
-    OBJDUMP = objdump
-else
-    CC = arm-none-eabi-gcc
-    CFLAGS = -Wall -Werror -g -O0 -std=c99 \
-        -mcpu=cortex-m4 -mthumb -march=armv7e-m -mfloat-abi=hard -mfpu=fpv4-sp-d16 --specs=nosys.specs
-    CPPFLAGS = -DMSP432
-    LDFLAGS = -T msp432p401r.lds
-    SIZE = arm-none-eabi-size
-    OBJDUMP = arm-none-eabi-objdump
+#------------------------------------------------------------------------
+# 2. Toolchain selection & flags
+#------------------------------------------------------------------------
+ifeq ($(PLATFORM),HOST)       # ------------ Native build ---------------
+    CC      := gcc
+    SIZE    := size
+    OBJDUMP := objdump
+    CFLAGS  :=
+    LDFLAGS :=
+else                           # ------------ MSP432 cross-build --------
+    CC      := arm-none-eabi-gcc
+    SIZE    := arm-none-eabi-size
+    OBJDUMP := arm-none-eabi-objdump
+    CFLAGS  := -mcpu=cortex-m4 -mthumb -march=armv7e-m \
+                    -mfloat-abi=hard -mfpu=fpv4-sp-d16 --specs=nosys.specs
+    LDFLAGS := -T msp432p401r.lds
 endif
 
-# Object and dependency files
+# Common compile flags (–MMD generates .d files, –MP adds phony targets)
+CFLAGS   := -Wall -Werror -g -O0 -std=c99 -MMD -MP $(CFLAGS)
+CPPFLAGS := -D$(PLATFORM)
+
+include sources.mk
+
+# Object and dendency files
 OBJS := $(SRCS:.c=.o)
+DEPS := $(SRCS:.c=.d)
 
 # Generate preprocessed output
 %.i: %.c
-	$(CC) $(INCLUDES) $(CPPFLAGS) -E $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(INCLUDES) -E $< -o $@
 
 # Generate assembly output
 %.asm: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) $(CPPFLAGS) -S $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(INCLUDES) -S $< -o $@
+	$(OBJDUMP) -D -S $< > $@
 
-# Generate assembly output using objdump
-%.objdump.asm: %.o
-	$(OBJDUMP) -dS $< > $@
-
-# Compile each .c to .o with dependency generation
+# Compile each .c to .o
 %.o: %.c
-	$(CC) $(CFLAGS) $(INCLUDES) $(CPPFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(INCLUDES) -c $< -o $@
 
 # .PHONY Protection
 .PHONY: compile-all build clean
@@ -85,7 +86,8 @@ compile-all: $(OBJS)
 # Default target: build everything
 build: $(TARGET)
 $(TARGET): $(OBJS)
-	$(CC) $(CFLAGS) $(INCLUDES) $(CPPFLAGS) $(LDFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) $(CPPFLAGS) $(INCLUDES) -Wl,-Map=$(basename $(TARGET)).map $(LDFLAGS) $^ -o $@
+	$(SIZE) $@
 
 # Clean target: remove all generated files
 clean:
